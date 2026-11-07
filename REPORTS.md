@@ -312,6 +312,60 @@ Raw JSON by round (four cases per file):
 - Round 3: [PR head](results/2026-11-07-zero-arity-before-1b32e830c-r3.json.xz),
   [fix](results/2026-11-07-zero-arity-after-52d49d34b-r3.json.xz).
 
+#### Whole suite: `2026-11-07-pr1071-full`, `1b32e830c` vs develop `806dab117`
+
+Every benchmark class on develop `806dab117` and #1071's `1b32e830c` (before its rebase on the develop with #1075 and
+#1082), both with the union of #1071's and #1075's benchmark sources (so the STRIPS, `nrev-100` and `bind-vars`
+workloads, and `RecursiveTermsBenchmark`, are included). Intel Xeon Gold 6248R, 16 vCPUs of a shared Proxmox host,
+32 GiB, OpenJDK 21.0.12.1, JMH 1.37; `-wi 2 -i 3 -w 1s -r 1s -f 1 -prof gc`, `-Xms512m -Xmx4g`; sides alternating
+per class and size. Errors are wide at 3 iterations on a shared host (often ±20–50%): read cases near 1× as unchanged.
+
+Theory classes skip `size=100000` on develop and extrapolate it as `S(10k)²/S(1k)` (marked ≈).
+`RecursiveTermsBenchmark` stops at size 1000 on both sides: at 100,000 its quadratic pre-#1075 cases took over 10
+minutes per warm-up iteration.
+
+| Class | Measured cases | Speedup (geomean; range) | Estimated 100k cases | Estimated speedup |
+|---|---:|---|---:|---|
+| PrologSolverBenchmark | 48 | 1.31×; 0.84–1.83× | 0 | — |
+| UnificatorSolverBenchmark | 14 | 1.56×; 0.98–2.56× | 0 | — |
+| TheorySolverBenchmark | 6 | 11.15×; 1.64–7.92e+4× | 0 | — |
+| TheoryLookupBenchmark | 108 | 23.15×; 0.94–1.31e+6× | 36 | ≈ 489×; 1.22–1.62e+8× |
+| TheoryMutationBenchmark | 36 | 24.57×; 0.95–8.21e+3× | 12 | ≈ 88.9×; 1.20–4.29e+4× |
+| TheoryIterationBenchmark | 40 | 50.68×; 0.78–4.23e+4× | 20 | ≈ 178×; 0.80–3.56e+5× |
+| TheoryConstructionBenchmark | 8 | 13.72×; 11.6–16.9× | 2 | ≈ 5.93×; 4.98–7.07× |
+| TheoryIncrementalConstructionBenchmark | 6 | 87.97×; 14.0–2.48e+3× | 0 | — |
+| TheoryChurnBenchmark | 12 | 43.46×; 1.31–4.08e+6× | 0 | — |
+| RecursiveTermsBenchmark (sizes 10–1000) | 864 | 1.00×; 0.80–1.25× | 0 | — |
+| UnificationBenchmark | 84 | 1.00×; 0.86–1.11× | 0 | — |
+| TimeoutOvershootBenchmark | 4 | 1.00×; 0.94–1.09× | 0 | — |
+
+Resolution (`PrologSolverBenchmark`, direct chronometer, no timeout), ops/s and bytes allocated per op:
+
+| Workload | Develop | #1071 | Speedup | Develop B/op | #1071 B/op |
+|---|---:|---:|---:|---:|---:|
+| tiny | 778,200 | 770,600 | 0.99× | 3,488 | 3,504 |
+| deep-recursion | 24.53 | 39.16 | 1.60× | 70.1 M | 50.5 M |
+| nrev | 41.49 | 68.61 | 1.65× | 32.0 M | 24.3 M |
+| nrev-100 | 0.579 | 0.656 | 1.13× | 1,432 M | 1,352 M |
+| bind-vars | 5.507 | 7.557 | 1.37× | 194 M | 175 M |
+| strips-list | 0.335 | 0.403 | 1.20× | 2,191 M | 1,850 M |
+| strips-tuple | 0.253 | 0.296 | 1.17× | 2,680 M | 2,304 M |
+| strips-block | 0.260 | 0.296 | 1.14× | 2,689 M | 2,340 M |
+| backtracking | 2.943 | 5.377 | 1.83× | 411 M | 283 M |
+| failing-search | 12.96 | 17.59 | 1.36× | 119 M | 95.2 M |
+| nested-solving | 22.27 | 32.53 | 1.46× | 67.8 M | 53.2 M |
+| primitives | 66.01 | 91.51 | 1.39× | 25.0 M | 21.0 M |
+
+Zero-arity lookups (`size=1000`: 0.94–0.96× for `all`, 1.14–1.24× for `first`; 1.16–1.27× at 10k) do not reproduce
+the M1's 0.87× for mutable `all` beyond noise. Unification and recursive terms, which #1071 does not touch, are
+unchanged.
+
+Files: [comparison of every case](results/2026-11-07-pr1071-full-comparison.md), raw JSON
+([develop](results/2026-11-07-pr1071-full-develop-806dab117.json.xz),
+[#1071](results/2026-11-07-pr1071-full-head-1b32e830c.json.xz)),
+[extrapolated develop scores](results/2026-11-07-pr1071-full-develop-estimates.json.xz),
+[manifest](results/2026-11-07-pr1071-full-manifest.json.xz).
+
 #### Historical implementation comparison
 
 Baseline `2a6b358` (develop's `:theory` plus these benchmarks) against `6e974c2`, except `Churn` (`bb2dd7e`) and
