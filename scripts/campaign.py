@@ -3,6 +3,7 @@
 
     scripts/campaign.py --repo ../2p-kt --before origin/develop --after origin/my-branch --label my-change
     scripts/campaign.py ... --only 'theory\\.TheoryLookup'      # a subset of benchmarks (regexp on the full name)
+    scripts/campaign.py ... --cases 'all/.*query=zero-arity'     # a subset of cases (regexp on the case id)
     scripts/campaign.py --self-test
 
 Each measurement is one case (benchmark method + parameters) on one side, in one JMH fork. Both sides run the
@@ -11,11 +12,12 @@ benchmark sources of `--sources` (default: `--after`), copied over, so only prod
 Theory sizes follow a ladder (10..100 by 10, ..1000 by 100, ..10000 by 1000, ..100000 by 10000), measured size by
 size across all cases, alternating which side goes first. A side stops climbing for a case when one measurement took,
 or is predicted from its fitted growth to take, more than `--budget` seconds; once the log-log slope of its last
-decade is within 0.1 of the previous decade's, it only measures decade boundaries. Sizes a side did not reach are
-extrapolated by `report.py` from that fit, and labelled as such.
+decade is within 0.1 of the previous decade's, it only measures decade boundaries. `report.py` interpolates the sizes
+a side skipped from its measured neighbours, and extrapolates those beyond its last one from its last decade's fit;
+both are labelled as such.
 
-After the first pass, cases whose after/before ratio has a 95% bootstrap interval wider than ±`--ci` (or that sit
-near parity with a single fork per side) get another round, up to `--rounds`.
+After the first pass, cases whose after/before ratio has a 95% bootstrap interval wider than ±`--ci` (or that are not
+clearly faster, with a single fork per side) get another round, up to `--rounds`.
 
 The output, `results/<date>-<label>.jsonl`, is the source of truth: rerunning the same command replays it and resumes
 where it stopped (Ctrl-C loses at most the measurement in progress). `--finish` compresses it to `.jsonl.xz`.
@@ -132,8 +134,8 @@ def git(repo, *args):
 
 def prepare(repo, ref, sources, work):
     """A worktree of `ref` with the benchmark sources of `sources`, built; returns (commit, JMH classpath)."""
-    tree = work / ref.replace("/", "_")
     commit = git(repo, "rev-parse", ref)
+    tree = work / commit[:12]  # by commit: a branch that moved gets a fresh tree, never a stale one
     if not tree.exists():
         git(repo, "worktree", "add", "-q", "--detach", str(tree), commit)
         git(tree, "checkout", "-q", sources, "--", "examples/src/benchmarks")
@@ -236,6 +238,7 @@ def main(argv=None):
     parser.add_argument("--sources", help="ref whose examples/src/benchmarks both sides use (default: --after)")
     parser.add_argument("--label")
     parser.add_argument("--only", default="", help="JMH include regexp")
+    parser.add_argument("--cases", default="", help="regexp searched in case ids (Class.method/param=value/...)")
     parser.add_argument("--budget", type=float, default=180, help="seconds per measurement before a side stops")
     parser.add_argument("--rounds", type=int, default=5)
     parser.add_argument("--ci", type=float, default=0.05, help="target half-width of the ratio's 95%% interval")
@@ -265,7 +268,12 @@ def main(argv=None):
     for side, ref in (("before", a.before), ("after", a.after)):
         sides[side] = prepare(a.repo, ref, sources, a.work)
     campaign = Campaign(path)
-    if not campaign.lines:
+    if campaign.lines:  # resuming: both sides must still be the commits the file started with
+        for side in sides:
+            if campaign.lines[0][side]["commit"] != sides[side][0]:
+                sys.exit(f"{path}: {side} was {campaign.lines[0][side]['commit'][:9]}, {a.__dict__[side]} is now "
+                         f"{sides[side][0][:9]}; use a new --label, or pass the commit")
+    else:
         campaign.append({
             "type": "campaign", "label": a.label, "started": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "before": {"ref": a.before, "commit": sides["before"][0]},
@@ -275,7 +283,7 @@ def main(argv=None):
             "host": host(),
         })
     benchmarks = list_cases(sides["after"][1], a.only)
-    cases = [c for b, params in benchmarks.items() for c in expand(b, params)]
+    cases = [c for b, params in benchmarks.items() for c in expand(b, params) if re.search(a.cases, case_id(*c[:2]))]
     timeout = max(3 * a.budget, 600)
 
     def run(case, benchmark, params, size, side, rnd):
@@ -323,8 +331,9 @@ def main(argv=None):
                 if not b or not f:
                     continue
                 r, lo, hi = ratio_ci(b, f)
-                near_parity = 0.8 < r < 1.25 and min(len(b), len(f)) < 2
-                if hi / r - 1 > a.ci or 1 - lo / r > a.ci or near_parity:
+                # one fork per side can't show fork-to-fork (JIT) variance: confirm anything short of a clear gain
+                unconfirmed = r < 1.25 and min(len(b), len(f)) < 2
+                if hi / r - 1 > a.ci or 1 - lo / r > a.ci or unconfirmed:
                     pending.append((case, benchmark, params, size))
         if not pending:
             break

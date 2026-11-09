@@ -366,6 +366,80 @@ Files: [comparison of every case](results/2026-11-07-pr1071-full-comparison.md),
 [extrapolated develop scores](results/2026-11-07-pr1071-full-develop-estimates.json.xz),
 [manifest](results/2026-11-07-pr1071-full-manifest.json.xz).
 
+#### Size ladder: `2026-11-07-pr1071-ladder`, `06a152c6e` vs develop `da7edf64e`
+
+The whole suite with [`scripts/campaign.py`](scripts/campaign.py): #1071 rebased on develop `da7edf64e` (with #1075 and
+#1082), both sides on #1071's benchmark sources. Intel Xeon Gold 6248R, 16 vCPUs of a shared Proxmox host, OpenJDK
+21.0.12.1; `-wi 3 -i 5 -w 1s -r 1s -f 1 -prof gc`, `-Xms512m -Xmx4g`, one fork per measurement, budget 180 s. Theory
+sizes climb 10, 20, … 100, 200, … 1000, 2000, … 10,000, 20,000, … 100,000; further rounds (up to 5) for cases with a
+95% interval wider than ±5% or not clearly faster on a single fork. Ratios are after/before throughput with
+hierarchical-bootstrap intervals; ≈ marks sizes develop skipped (interpolated) or did not reach within the budget
+(extrapolated from its last decade). About 7,800 measurements over 34 hours.
+
+| Class | Measured | Ratio (geomean; range) | Estimated (≈) | Ratio (geomean; range) |
+|---|---:|---|---:|---|
+| PrologSolverBenchmark | 48 | 1.36×; 0.99–1.90× | 0 | — |
+| UnificatorSolverBenchmark | 14 | 1.52×; 1.01–2.11× | 0 | — |
+| TheorySolverBenchmark | 5 | 1.93×; 1.63–3.22× | 0 | — |
+| TheoryLookupBenchmark | 764 | 15.3×; 0.91–1.48e+6× | 48 | ≈ 52.6×; 4.42–1.38e+8× |
+| TheoryMutationBenchmark | 283 | 34.7×; 0.98–1.58e+4× | 105 | ≈ 62.1×; 1.07–5.3e+4× |
+| TheoryIterationBenchmark | 427 | 51.2×; 0.89–2.57e+5× | 61 | ≈ 26.0×; 1.62–3.79e+5× |
+| TheoryConstructionBenchmark | 42 | 14.7×; 7.71–17.9× | 24 | ≈ 11.4×; 8.57–13.5× |
+| TheoryIncrementalConstructionBenchmark | 37 | 72.5×; 10.6–1.86e+3× | 29 | ≈ 174×; 9.54–6.5e+3× |
+| TheoryChurnBenchmark | 12 | 45.0×; 1.39–4.19e+6× | 0 | — |
+| RecursiveTermsBenchmark | 1197 | 1.00×; 0.75–1.40× | 0 | — |
+| UnificationBenchmark | 84 | 1.00×; 0.96–1.06× | 0 | — |
+| VariableCreationBenchmark | 6 | 1.00×; 0.97–1.01× | 0 | — |
+| TimeoutOvershootBenchmark | 4 | 0.98×; 0.97–1.00× | 0 | — |
+
+Resolution (`PrologSolverBenchmark`, direct chronometer, no timeout), ops/s:
+
+| Workload | Develop | #1071 | Ratio [95%] |
+|---|---:|---:|---|
+| tiny | 788,700 | 800,700 | 1.02× [0.99, 1.04] |
+| deep-recursion | 27.39 | 43.52 | 1.59× [1.54, 1.64] |
+| nrev | 49.72 | 83.24 | 1.67× [1.64, 1.70] |
+| nrev-100 | 1.533 | 2.023 | 1.32× [1.18, 1.46] |
+| bind-vars | 8.862 | 11.34 | 1.28× [1.25, 1.32] |
+| strips-list | 0.402 | 0.492 | 1.22× [1.20, 1.24] |
+| strips-tuple | 0.314 | 0.374 | 1.19× [1.17, 1.21] |
+| strips-block | 0.316 | 0.376 | 1.19× [1.17, 1.21] |
+| backtracking | 3.208 | 6.065 | 1.89× [1.86, 1.93] |
+| failing-search | 14.90 | 22.13 | 1.49× [1.43, 1.54] |
+| nested-solving | 24.80 | 35.32 | 1.42× [1.41, 1.44] |
+| primitives | 74.51 | 101.2 | 1.36× [1.33, 1.37] |
+
+- `TheorySolverBenchmark` has 5 cases: develop's `fact-table-arg1` exceeds the 600 s measurement timeout.
+- Develop stops climbing (180 s budget) on 16 of 72 theory ladders, between 20,000 and 90,000 clauses, and at 700 for
+  immutable incremental construction (slope 2.5). #1071 reaches 100,000 on every ladder but that one, which it stops
+  at 20,000: still superlinear (slopes 1.3, 1.9 and 2.25 per decade up to 10,000). Mutable bulk construction grows with slope 1.4 between 10,000 and 100,000 on #1071, against
+  1.0 below.
+- Slower cases with 95% intervals below 1 (≥ 2 forks per side):
+  - zero-arity `all` lookups, 0.91–0.94× at sizes 70–300, and immutable `hashCode` iteration, 0.89–0.97× at sizes
+    50–1000: fixed on #1071 (see the next section);
+  - five `RecursiveTermsBenchmark` cases at sizes 10–101 (0.75–0.96×), and one at 100,000 (0.92×). #1071 changes no
+    term code (it only adds `core`'s `Variants.kt`), and the same benchmark flips between forks (`sizeEverySuffix`
+    tuple-lazy 99: 0.69× on fork 1, 1.21× on fork 3): JIT and layout effects, not regressions.
+
+Files: [campaign JSONL](results/2026-11-07-pr1071-ladder.jsonl.xz); `python3 scripts/report.py <file> --cases` prints
+every case and the per-decade growth of each ladder.
+
+#### Regression fixes: `2026-11-09-pr1071-regressions`, `b63616ccb` vs develop `da7edf64e`
+
+The two regressions above, on #1071's `2e8c2300a` (zero-arity scans through a plain `Sequence.filter`) and `b63616ccb`
+(`IndexedTheory` caches its hash like `java.lang.String`), same host and settings, whole ladder, 2–5 forks per side:
+
+| Case | Before the fixes | After |
+|---|---|---|
+| `whole`, immutable `hashCode`, 1 predicate | 0.89–0.97× (50–1000) | 1.08–1.18× (10–1000), 1.48× (10k, 100k) |
+| `whole`, immutable `hashCode`, 1000 predicates | 0.94–0.95× (40k, 80k) | 1.15–1.57× (1k–100k) |
+| `all`, immutable, zero-arity | 0.91–0.93× (80, 300) | 1.00–1.15× (10–1000), 1.20× (100k) |
+| `all`, mutable, zero-arity | 0.91–0.94× (70, 90) | **0.86–0.94× (60–1000)**, 1.03× (10k), 1.18× (100k) |
+
+Mutable zero-arity lookups still lose up to 14% between 60 and 1000 clauses on this host (0.96–1.02× on the M1).
+
+File: [campaign JSONL](results/2026-11-09-pr1071-regressions.jsonl.xz).
+
 #### Historical implementation comparison
 
 Baseline `2a6b358` (develop's `:theory` plus these benchmarks) against `6e974c2`, except `Churn` (`bb2dd7e`) and

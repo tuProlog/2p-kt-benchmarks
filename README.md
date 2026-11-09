@@ -28,9 +28,13 @@ scripts/campaign.py ... --finish                             # xz-compresses the
 - Theory benchmarks climb a size ladder (10–100 by 10, to 1000 by 100, to 10,000 by 1000, to 100,000 by 10,000), size
   by size across all cases, alternating which side goes first. A side stops climbing a case when one measurement took,
   or is predicted to take, more than `--budget` seconds (default 180), or after a failure; once its growth (log-log slope
-  of time per op) is the same over two consecutive decades, it only measures decade boundaries. `report.py` extrapolates
-  the sizes a side did not reach from its last decade's fit, and marks them `≈`.
+  of time per op) is the same over two consecutive decades, it only measures decade boundaries. `report.py` interpolates
+  the sizes a side skipped between its measured neighbours, extrapolates those beyond its last one from its last decade's
+  fit, and marks both `≈`.
 - Each measurement is a single fork. Cases whose after/before ratio has a 95% bootstrap interval wider than ±5% (`--ci`),
-  or that sit near parity with one fork per side, get further rounds, up to 5 (`--rounds`).
+  or that are not clearly faster (ratio below 1.25) with one fork per side, get further rounds, up to 5 (`--rounds`): a
+  single fork can't show fork-to-fork (JIT) variance.
+- `--cases REGEXP` narrows the run to matching case ids (`Class.method/param=value/...`), e.g. for a focused re-run.
+  Worktrees are keyed by commit, and resuming refuses a file whose refs have since moved: pass the commits instead.
 - Rerunning the same command resumes from the JSONL. `python3 scripts/campaign.py --self-test` checks the stop rules and
   the statistics.
