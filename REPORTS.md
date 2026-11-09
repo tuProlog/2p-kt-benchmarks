@@ -440,6 +440,19 @@ Mutable zero-arity lookups still lose up to 14% between 60 and 1000 clauses on t
 
 File: [campaign JSONL](results/2026-11-09-pr1071-regressions.jsonl.xz).
 
+Candidate `3f55613d7` (branch `ccr-0b4a13b3-ejoi9f-mutable-zero-arity`) scans zero-arity mutable procedures exactly like
+immutable ones (`visibleAt` straight to clauses, then `Sequence.filter { unificator.match(query, it) }`). Same host and
+settings, develop `da7edf64e` vs `3f55613d7`, 2–5 forks per side:
+
+| Case | 10–50 | 60–100 | 200–1000 | 10k | 100k |
+|---|---|---|---|---|---|
+| `all`, mutable, zero-arity | 0.99–1.06× | 1.07–1.17× | 0.97–1.05× | 1.08× | 1.14× |
+| `all`, immutable, zero-arity (control) | 1.02–1.04× | 1.07–1.15× | 1.02–1.08× | 1.02× | 1.21× |
+
+No size has its 95% interval below 1 (lowest: 0.97× [0.92, 1.03] at 300).
+
+File: [campaign JSONL](results/2026-11-09-pr1071-mutable-zero-arity.jsonl.xz).
+
 #### Historical implementation comparison
 
 Baseline `2a6b358` (develop's `:theory` plus these benchmarks) against `6e974c2`, except `Churn` (`bb2dd7e`) and
